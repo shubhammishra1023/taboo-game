@@ -860,6 +860,7 @@ export default function App() {
           onDeletePack={handleDeleteCustomPack}
           displayName={displayName}
           avatarConfig={avatarConfig}
+          avatarUrl={userProfile.useGooglePhoto !== false ? userProfile.avatarUrl : undefined}
           onEditProfile={() => setIsProfileDrawerOpen(true)}
         />
       ) : currentView === 'create-custom-pack' ? (
@@ -868,6 +869,7 @@ export default function App() {
           onBackToPacks={() => setCurrentView('custom-packs')}
           onSavePack={handleSaveCustomPack}
           avatarConfig={avatarConfig}
+          avatarUrl={userProfile.useGooglePhoto !== false ? userProfile.avatarUrl : undefined}
           onEditProfile={() => setIsProfileDrawerOpen(true)}
         />
       ) : (

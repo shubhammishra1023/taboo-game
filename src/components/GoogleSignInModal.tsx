@@ -145,9 +145,6 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
                     <span className="text-sm font-bold text-white group-hover:text-pink-300 transition-colors truncate">
                       {defaultAccount.name}
                     </span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-pink-500/20 text-pink-300 font-bold">
-                      Verified
-                    </span>
                   </div>
                   <span className="text-xs text-zinc-400 truncate block">
                     {defaultAccount.email}

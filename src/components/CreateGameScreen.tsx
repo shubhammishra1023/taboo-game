@@ -95,11 +95,6 @@ export const CreateGameScreen: React.FC<CreateGameScreenProps> = ({
             >
               {displayName || 'Player'}
             </h2>
-            {isGoogleUser && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-bold">
-                Google Verified
-              </span>
-            )}
           </div>
 
           <button

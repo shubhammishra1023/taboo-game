@@ -8,6 +8,7 @@ interface CreateCustomPackScreenProps {
   onBackToPacks: () => void;
   onSavePack: (pack: WordPack) => void;
   avatarConfig: AvatarConfig;
+  avatarUrl?: string;
   onEditProfile: () => void;
 }
 
@@ -15,6 +16,7 @@ export const CreateCustomPackScreen: React.FC<CreateCustomPackScreenProps> = ({
   onBackToPacks,
   onSavePack,
   avatarConfig,
+  avatarUrl,
   onEditProfile,
 }) => {
   const [title, setTitle] = useState('');
@@ -173,9 +175,9 @@ Return ONLY a valid raw JSON array of objects without Markdown code fences, like
               sounds.playClick();
               onEditProfile();
             }}
-            className="hover:scale-105 transition-transform"
+            className="hover:scale-105 transition-transform cursor-pointer"
           >
-            <AvatarRenderer config={avatarConfig} size={36} />
+            <AvatarRenderer config={avatarConfig} imageUrl={avatarUrl} size={36} />
           </button>
         </div>
       </div>

@@ -145,9 +145,6 @@ export const ProfileDrawer: React.FC<ProfileDrawerProps> = ({
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-bold text-white truncate">Google Account</span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold">
-                      Verified
-                    </span>
                   </div>
                   <span className="text-[11px] text-zinc-400 truncate block">
                     {userProfile.email || 'Signed in'}

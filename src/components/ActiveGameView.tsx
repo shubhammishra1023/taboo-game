@@ -203,13 +203,11 @@ export const ActiveGameView: React.FC<ActiveGameViewProps> = ({
             className="hover:scale-105 transition-transform cursor-pointer"
             title="Profile"
           >
-            {avatarConfig ? (
-              <AvatarRenderer config={avatarConfig} size={36} />
-            ) : (
-              <div className="w-9 h-9 rounded-full bg-pink-600 flex items-center justify-center font-bold text-white text-sm">
-                {currentPlayer?.name?.charAt(0) || 'U'}
-              </div>
-            )}
+            <AvatarRenderer
+              config={avatarConfig}
+              imageUrl={currentPlayer?.avatarUrl}
+              size={36}
+            />
           </button>
         </div>
       </header>
@@ -331,11 +329,15 @@ export const ActiveGameView: React.FC<ActiveGameViewProps> = ({
               <div className="w-full bg-[#121524] border border-zinc-800/90 rounded-3xl p-8 sm:p-10 shadow-2xl flex flex-col items-center justify-center text-center min-h-[420px]">
                 {/* Large Explainer Avatar */}
                 <div className="relative mb-6">
-                  {explainer?.avatarConfig ? (
-                    <AvatarRenderer config={explainer.avatarConfig} size={88} />
+                  {explainer ? (
+                    <AvatarRenderer
+                      config={explainer.avatarConfig}
+                      imageUrl={explainer.avatarUrl}
+                      size={88}
+                    />
                   ) : (
                     <div className="w-22 h-22 rounded-full bg-pink-600 flex items-center justify-center text-4xl shadow-xl border-4 border-pink-500/40">
-                      {explainer?.avatar || '🎤'}
+                      🎤
                     </div>
                   )}
                   <div className="absolute -bottom-2 -right-2 p-2 rounded-full bg-[#121524] border border-zinc-700 text-pink-400 shadow-md">
@@ -405,11 +407,15 @@ export const ActiveGameView: React.FC<ActiveGameViewProps> = ({
                 ) : (
                   <>
                     <div className="relative mb-6">
-                      {explainer?.avatarConfig ? (
-                        <AvatarRenderer config={explainer.avatarConfig} size={88} />
+                      {explainer ? (
+                        <AvatarRenderer
+                          config={explainer.avatarConfig}
+                          imageUrl={explainer.avatarUrl}
+                          size={88}
+                        />
                       ) : (
                         <div className="w-22 h-22 rounded-full bg-pink-600 flex items-center justify-center text-4xl shadow-xl border-4 border-pink-500/40">
-                          {explainer?.avatar || '🎤'}
+                          🎤
                         </div>
                       )}
                       <div className="absolute -bottom-2 -right-2 p-2 rounded-full bg-[#121524] border border-zinc-700 text-pink-400 shadow-md">
@@ -584,8 +590,12 @@ export const ActiveGameView: React.FC<ActiveGameViewProps> = ({
                     className="flex items-center justify-between p-2.5 rounded-2xl bg-[#0e101c] border border-zinc-800/80 relative"
                   >
                     <div className="flex items-center gap-2.5">
-                      {p.avatarConfig ? (
-                        <AvatarRenderer config={p.avatarConfig} size={28} />
+                      {p.avatarUrl || p.avatarConfig ? (
+                        <AvatarRenderer
+                          config={p.avatarConfig}
+                          imageUrl={p.avatarUrl}
+                          size={28}
+                        />
                       ) : (
                         <span className="text-base">{p.avatar}</span>
                       )}
@@ -662,8 +672,12 @@ export const ActiveGameView: React.FC<ActiveGameViewProps> = ({
                     className="flex items-center justify-between p-2.5 rounded-2xl bg-[#0e101c] border border-zinc-800/80 relative"
                   >
                     <div className="flex items-center gap-2.5">
-                      {p.avatarConfig ? (
-                        <AvatarRenderer config={p.avatarConfig} size={28} />
+                      {p.avatarUrl || p.avatarConfig ? (
+                        <AvatarRenderer
+                          config={p.avatarConfig}
+                          imageUrl={p.avatarUrl}
+                          size={28}
+                        />
                       ) : (
                         <span className="text-base">{p.avatar}</span>
                       )}
@@ -730,8 +744,12 @@ export const ActiveGameView: React.FC<ActiveGameViewProps> = ({
                   key={p.id}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#0e101c] border border-zinc-800"
                 >
-                  {p.avatarConfig ? (
-                    <AvatarRenderer config={p.avatarConfig} size={24} />
+                  {p.avatarUrl || p.avatarConfig ? (
+                    <AvatarRenderer
+                      config={p.avatarConfig}
+                      imageUrl={p.avatarUrl}
+                      size={24}
+                    />
                   ) : (
                     <span>{p.avatar}</span>
                   )}

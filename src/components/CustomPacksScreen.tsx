@@ -11,6 +11,7 @@ interface CustomPacksScreenProps {
   onDeletePack: (packId: string) => void;
   displayName: string;
   avatarConfig: AvatarConfig;
+  avatarUrl?: string;
   onEditProfile: () => void;
 }
 
@@ -20,6 +21,7 @@ export const CustomPacksScreen: React.FC<CustomPacksScreenProps> = ({
   customPacks,
   onDeletePack,
   avatarConfig,
+  avatarUrl,
   onEditProfile,
 }) => {
   return (
@@ -50,9 +52,9 @@ export const CustomPacksScreen: React.FC<CustomPacksScreenProps> = ({
               sounds.playClick();
               onEditProfile();
             }}
-            className="hover:scale-105 transition-transform"
+            className="hover:scale-105 transition-transform cursor-pointer"
           >
-            <AvatarRenderer config={avatarConfig} size={36} />
+            <AvatarRenderer config={avatarConfig} imageUrl={avatarUrl} size={36} />
           </button>
         </div>
       </div>

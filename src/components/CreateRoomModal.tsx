@@ -90,29 +90,15 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
           {/* Host Preview */}
           <div className="flex items-center justify-between p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
             <div className="flex items-center gap-3">
-              {userProfile.useGooglePhoto !== false && userProfile.avatarUrl ? (
-                <img
-                  src={userProfile.avatarUrl}
-                  alt={userProfile.name}
-                  className="size-9 rounded-full object-cover border border-white/20"
-                  referrerPolicy="no-referrer"
-                />
-              ) : avatarConfig ? (
-                <AvatarRenderer config={avatarConfig} size={36} />
-              ) : (
-                <span className="text-2xl leading-none">{userProfile.avatar}</span>
-              )}
+              <AvatarRenderer
+                config={avatarConfig}
+                imageUrl={userProfile.useGooglePhoto !== false ? userProfile.avatarUrl : undefined}
+                size={36}
+              />
               <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-zinc-400 font-semibold uppercase tracking-wider block">
-                    Hosting as
-                  </span>
-                  {userProfile.isGoogleUser && (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 font-bold">
-                      Google Host
-                    </span>
-                  )}
-                </div>
+                <span className="text-[11px] text-zinc-400 font-semibold uppercase tracking-wider block">
+                  Hosting as
+                </span>
                 <span className="text-sm font-bold text-white">{userProfile.name}</span>
               </div>
             </div>

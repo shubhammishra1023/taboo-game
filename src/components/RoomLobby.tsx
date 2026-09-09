@@ -144,7 +144,11 @@ export const RoomLobby: React.FC<RoomLobbyProps> = ({
             className="hover:scale-105 transition-transform cursor-pointer"
             title="Edit Profile"
           >
-            <AvatarRenderer config={avatarConfig} size={36} />
+            <AvatarRenderer
+              config={avatarConfig}
+              imageUrl={currentPlayer?.avatarUrl}
+              size={36}
+            />
           </button>
         </div>
       </header>
@@ -199,8 +203,12 @@ export const RoomLobby: React.FC<RoomLobbyProps> = ({
                         className="flex items-center justify-between p-2.5 rounded-2xl bg-[#0e101c] border border-zinc-800/80 relative"
                       >
                         <div className="flex items-center gap-3">
-                          {p.avatarConfig ? (
-                            <AvatarRenderer config={p.avatarConfig} size={32} />
+                          {p.avatarUrl || p.avatarConfig ? (
+                            <AvatarRenderer
+                              config={p.avatarConfig}
+                              imageUrl={p.avatarUrl}
+                              size={32}
+                            />
                           ) : (
                             <span className="text-xl">{p.avatar}</span>
                           )}
@@ -290,8 +298,12 @@ export const RoomLobby: React.FC<RoomLobbyProps> = ({
                         className="flex items-center justify-between p-2.5 rounded-2xl bg-[#0e101c] border border-zinc-800/80 relative"
                       >
                         <div className="flex items-center gap-3">
-                          {p.avatarConfig ? (
-                            <AvatarRenderer config={p.avatarConfig} size={32} />
+                          {p.avatarUrl || p.avatarConfig ? (
+                            <AvatarRenderer
+                              config={p.avatarConfig}
+                              imageUrl={p.avatarUrl}
+                              size={32}
+                            />
                           ) : (
                             <span className="text-xl">{p.avatar}</span>
                           )}
@@ -380,8 +392,12 @@ export const RoomLobby: React.FC<RoomLobbyProps> = ({
                       className="flex items-center justify-between p-2.5 rounded-2xl bg-[#0e101c] border border-zinc-800/80 relative"
                     >
                       <div className="flex items-center gap-2.5">
-                        {p.avatarConfig ? (
-                          <AvatarRenderer config={p.avatarConfig} size={28} />
+                        {p.avatarUrl || p.avatarConfig ? (
+                          <AvatarRenderer
+                            config={p.avatarConfig}
+                            imageUrl={p.avatarUrl}
+                            size={28}
+                          />
                         ) : (
                           <span className="text-lg">{p.avatar}</span>
                         )}
