@@ -1,0 +1,6 @@
+{
+  "name": "Stormio - Taboo Online",
+  "description": "Play the Taboo game online with friends: create an instant room, pick teams, and start guessing free—no sign-up or download needed.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
