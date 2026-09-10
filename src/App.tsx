@@ -6,13 +6,18 @@ import {
   generateRoomCode,
   UserProfile,
   createNewGame,
+  createGuestGame,
+  addPlayerToGame,
   movePlayerTeam,
   skipExplainerTurn,
   transferHostRole,
   kickPlayerFromGame,
-  checkGuessMatch,
+  applyChatMessage,
+  applyBuzzAction,
+  getCardsForGame,
   DEFAULT_SETTINGS,
 } from './utils/gameStore';
+import { roomSync } from './utils/roomSync';
 
 // Components
 import { Header } from './components/Header';
@@ -38,6 +43,7 @@ import { SelectWordPacksModal } from './components/SelectWordPacksModal';
 import { GameOverModal } from './components/GameOverModal';
 import { InfoModals } from './components/InfoModals';
 import { GoogleSignInModal } from './components/GoogleSignInModal';
+import { auth, logOut, onAuthStateChanged } from './lib/firebase';
 
 const USER_STORAGE_KEY = 'stormio_user_profile';
 const AVATAR_CONFIG_KEY = 'stormio_avatar_config';
@@ -106,6 +112,36 @@ export default function App() {
     }));
   }, [displayName]);
 
+  // Listen to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        const googleName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Google Player';
+        const googleAvatar = firebaseUser.photoURL || '';
+        const googleEmail = firebaseUser.email || '';
+
+        setDisplayName(googleName);
+        setUserProfile((prev) => {
+          const updated: UserProfile = {
+            ...prev,
+            id: firebaseUser.uid,
+            name: googleName,
+            email: googleEmail,
+            avatarUrl: googleAvatar,
+            isGoogleUser: true,
+            useGooglePhoto: true,
+          };
+          try {
+            localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   // 2. Custom Packs State
   const [customPacks, setCustomPacks] = useState<WordPack[]>(() => {
     try {
@@ -156,7 +192,7 @@ export default function App() {
     if (gameState) {
       setGameState((prev) => {
         if (!prev) return null;
-        return {
+        const next: GameState = {
           ...prev,
           players: prev.players.map((p) =>
             p.id === userProfile.id
@@ -168,6 +204,8 @@ export default function App() {
               : p
           ),
         };
+        roomSync.broadcastState(next);
+        return next;
       });
     }
 
@@ -177,8 +215,9 @@ export default function App() {
     }
   };
 
-  const handleSignOutGoogle = () => {
+  const handleSignOutGoogle = async () => {
     sounds.playBuzz();
+    await logOut();
     const guestProfile: UserProfile = {
       id: `user-${Date.now()}`,
       name: 'Guest Player',
@@ -223,7 +262,7 @@ export default function App() {
 
       setGameState((prev) => {
         if (!prev) return null;
-        return {
+        const next: GameState = {
           ...prev,
           players: prev.players.map((p) =>
             p.id === userProfile.id
@@ -237,6 +276,8 @@ export default function App() {
               : p
           ),
         };
+        roomSync.broadcastState(next);
+        return next;
       });
     }
   };
@@ -268,14 +309,64 @@ export default function App() {
     setCurrentView('create');
   };
 
-  // Room Creation Handler (host only)
-  const handleCreateRoom = (customSettings?: Partial<GameSettings>) => {
-    if (!userProfile.isGoogleUser) {
-      setGoogleSignInIntent('createRoom');
-      setIsGoogleSignInOpen(true);
-      return;
-    }
+  // Handle actions received on the host from guest players
+  const handleGuestActionOnHost = (action: string, payload: any, senderId: string) => {
+    setGameState((prev) => {
+      if (!prev) return null;
+      let next: GameState | null = prev;
 
+      if (action === 'JOIN_REQUEST') {
+        next = addPlayerToGame(prev, payload.player, payload.asSpectator);
+      } else if (action === 'MOVE_TEAM') {
+        const actor = prev.players.find((p) => p.id === senderId);
+        next = movePlayerTeam(prev, payload.playerId || senderId, payload.targetTeam, actor?.name);
+      } else if (action === 'SEND_MESSAGE') {
+        const sender = prev.players.find((p) => p.id === senderId) || {
+          id: senderId,
+          name: payload.senderName || 'Player',
+          avatar: '👱',
+          team: 'spectator' as TeamId,
+        };
+        const result = applyChatMessage(prev, payload.text, sender);
+        if (result.isCorrect) {
+          sounds.playCorrect();
+        }
+        next = result.updatedState;
+      } else if (action === 'BUZZ') {
+        const buzzer = prev.players.find((p) => p.id === senderId);
+        sounds.playBuzz();
+        next = applyBuzzAction(prev, payload.tabooWord || '', buzzer?.name);
+      } else if (action === 'LEAVE') {
+        const leftPlayer = prev.players.find((p) => p.id === senderId);
+        const remainingPlayers = prev.players.filter((p) => p.id !== senderId);
+        next = {
+          ...prev,
+          players: remainingPlayers,
+          messages: [
+            ...prev.messages,
+            {
+              id: `sys-${Date.now()}`,
+              playerId: 'system',
+              playerName: 'System',
+              avatar: '👋',
+              team: 'spectator',
+              text: `${leftPlayer?.name || 'A player'} left the room.`,
+              timestamp: Date.now(),
+              isSystem: true,
+            },
+          ],
+        };
+      }
+
+      if (next) {
+        roomSync.broadcastState(next);
+      }
+      return next;
+    });
+  };
+
+  // Room Creation Handler (host only)
+  const handleCreateRoom = async (customSettings?: Partial<GameSettings>) => {
     const code = generateRoomCode();
     const allPacks = [...WORD_PACKS, ...customPacks];
     const initialSettings: GameSettings = {
@@ -300,34 +391,101 @@ export default function App() {
     setGameState(newGame);
     setCurrentView('home'); // inside game, gameState takes precedence
 
+    // Register room on server
+    await roomSync.registerRoomOnServer(newGame);
+
+    // Register sync as Host
+    roomSync.init(
+      code,
+      true,
+      (state) => setGameState(state),
+      (action, payload, senderId) => handleGuestActionOnHost(action, payload, senderId)
+    );
+    roomSync.broadcastState(newGame);
+
     try {
       window.history.pushState({}, '', `?room=${code}`);
     } catch {}
   };
 
   // Room Join Handler
-  const handleJoinRoom = (code: string, asSpectator: boolean = false) => {
+  const handleJoinRoom = async (code: string, asSpectator: boolean = false) => {
     const cleanCode = code.trim().toUpperCase();
-    const allPacks = [...WORD_PACKS, ...customPacks];
-    const newGame = createNewGame(
-      cleanCode,
-      { ...userProfile, name: displayName },
-      DEFAULT_SETTINGS,
-      allPacks,
-      avatarConfig
-    );
-    if (asSpectator) {
-      newGame.players = newGame.players.map((p) =>
-        p.id === userProfile.id ? { ...p, team: 'spectator' } : p
-      );
-    }
-    setGameState(newGame);
-    setCurrentView('home');
+    if (!cleanCode) return;
 
-    try {
-      const spectateQuery = asSpectator ? '&spectate=true' : '';
-      window.history.pushState({}, '', `?room=${cleanCode}${spectateQuery}`);
-    } catch {}
+    const guestPlayerProfile = {
+      id: userProfile.id,
+      name: displayName,
+      avatar: userProfile.avatar,
+      avatarUrl: userProfile.useGooglePhoto !== false ? userProfile.avatarUrl : undefined,
+      avatarConfig,
+    };
+
+    // 1. Join room on authoritative server (works across any link, browser, device)
+    const serverResult = await roomSync.joinRoomOnServer(cleanCode, guestPlayerProfile, asSpectator);
+
+    if (serverResult.success && serverResult.room) {
+      const isRoomHost = serverResult.room.hostId === userProfile.id;
+      setGameState(serverResult.room);
+      setCurrentView('home');
+
+      roomSync.init(
+        cleanCode,
+        isRoomHost,
+        (state) => setGameState(state),
+        (action, payload, senderId) => handleGuestActionOnHost(action, payload, senderId)
+      );
+
+      try {
+        const spectateQuery = asSpectator ? '&spectate=true' : '';
+        window.history.pushState({}, '', `?room=${cleanCode}${spectateQuery}`);
+      } catch {}
+      return;
+    }
+
+    // 2. Check local storage if the room was created in this browser
+    const savedState = roomSync.getSavedState(cleanCode);
+
+    if (savedState) {
+      const isRoomHost = savedState.hostId === userProfile.id;
+
+      if (isRoomHost) {
+        // Current user is the host who created the room!
+        setGameState(savedState);
+        setCurrentView('home');
+
+        roomSync.init(
+          cleanCode,
+          true,
+          (state) => setGameState(state),
+          (action, payload, senderId) => handleGuestActionOnHost(action, payload, senderId)
+        );
+        roomSync.registerRoomOnServer(savedState);
+        roomSync.broadcastState(savedState);
+      } else {
+        // Current user is joining as a GUEST (isHost: false)
+        const updatedState = addPlayerToGame(savedState, guestPlayerProfile, asSpectator);
+        setGameState(updatedState);
+        setCurrentView('home');
+
+        roomSync.init(
+          cleanCode,
+          false,
+          (state) => setGameState(state)
+        );
+
+        roomSync.broadcastState(updatedState);
+      }
+
+      try {
+        const spectateQuery = asSpectator ? '&spectate=true' : '';
+        window.history.pushState({}, '', `?room=${cleanCode}${spectateQuery}`);
+      } catch {}
+      return;
+    }
+
+    // 3. Room not found
+    alert(`Room "${cleanCode}" was not found. Please verify the 4-letter room code with the host.`);
   };
 
   // URL parsing on mount
@@ -344,10 +502,25 @@ export default function App() {
   const handleJoinTeam = (team: TeamId) => {
     if (!gameState) return;
     sounds.playClick();
-    setGameState((prev) => {
-      if (!prev) return null;
-      return movePlayerTeam(prev, userProfile.id, team);
-    });
+    const isHost = gameState.players.find((p) => p.id === userProfile.id)?.isHost;
+
+    if (isHost) {
+      setGameState((prev) => {
+        if (!prev) return null;
+        const next = movePlayerTeam(prev, userProfile.id, team);
+        roomSync.broadcastState(next);
+        return next;
+      });
+    } else {
+      // Optimistic update for guest + send to host
+      setGameState((prev) => (prev ? movePlayerTeam(prev, userProfile.id, team) : null));
+      roomSync.sendToHost({
+        type: 'PLAYER_ACTION',
+        action: 'MOVE_TEAM',
+        payload: { playerId: userProfile.id, targetTeam: team },
+        senderId: userProfile.id,
+      });
+    }
   };
 
   // Host or player moving another player
@@ -358,7 +531,9 @@ export default function App() {
     sounds.playClick();
     setGameState((prev) => {
       if (!prev) return null;
-      return movePlayerTeam(prev, playerId, targetTeam, actorName);
+      const next = movePlayerTeam(prev, playerId, targetTeam, actorName);
+      roomSync.broadcastState(next);
+      return next;
     });
   };
 
@@ -372,7 +547,7 @@ export default function App() {
       const half = Math.ceil(shuffled.length / 2);
       const redIds = new Set(shuffled.slice(0, half).map((p) => p.id));
 
-      return {
+      const next: GameState = {
         ...prev,
         players: prev.players.map((p) => {
           if (p.team === 'spectator') return p;
@@ -382,6 +557,8 @@ export default function App() {
           };
         }),
       };
+      roomSync.broadcastState(next);
+      return next;
     });
   };
 
@@ -414,10 +591,12 @@ export default function App() {
 
     setGameState((prev) => {
       if (!prev) return null;
-      return {
+      const next: GameState = {
         ...prev,
         players: [...prev.players, botPlayer],
       };
+      roomSync.broadcastState(next);
+      return next;
     });
   };
 
@@ -435,7 +614,7 @@ export default function App() {
 
     setGameState((prev) => {
       if (!prev) return null;
-      return {
+      const next: GameState = {
         ...prev,
         status: 'playing',
         turn: {
@@ -452,11 +631,27 @@ export default function App() {
           buzzedWords: [],
         },
       };
+      roomSync.broadcastState(next);
+      return next;
     });
   };
 
   const handleLeaveGame = () => {
     sounds.playClick();
+    if (gameState) {
+      const isHost = gameState.players.find((p) => p.id === userProfile.id)?.isHost;
+      if (isHost) {
+        roomSync.removeSavedState(gameState.roomCode);
+      } else {
+        roomSync.sendToHost({
+          type: 'PLAYER_ACTION',
+          action: 'LEAVE',
+          payload: {},
+          senderId: userProfile.id,
+        });
+      }
+      roomSync.destroy();
+    }
     setGameState(null);
     setCurrentView('home');
     try {
@@ -468,13 +663,15 @@ export default function App() {
     if (!gameState) return;
     setGameState((prev) => {
       if (!prev) return null;
-      return {
+      const next: GameState = {
         ...prev,
         settings: {
           ...prev.settings,
           ...newSettings,
         },
       };
+      roomSync.broadcastState(next);
+      return next;
     });
   };
 
@@ -490,6 +687,30 @@ export default function App() {
       return;
     }
 
+    const isHost = gameState.players.find((p) => p.id === userProfile.id)?.isHost;
+
+    if (!isHost) {
+      // Non-host player: visual smooth ticking timer
+      const timer = setInterval(() => {
+        setGameState((prev) => {
+          if (!prev || prev.status !== 'playing' || prev.turn.status !== 'active') return prev;
+          if (prev.turn.timeRemaining <= 1) {
+            return {
+              ...prev,
+              turn: { ...prev.turn, timeRemaining: 0, status: 'turnEnded' },
+            };
+          }
+          if (prev.turn.timeRemaining <= 6) sounds.playTick();
+          return {
+            ...prev,
+            turn: { ...prev.turn, timeRemaining: prev.turn.timeRemaining - 1 },
+          };
+        });
+      }, 1000);
+      return () => clearInterval(timer);
+    }
+
+    // Host player: Authoritative timer that broadcasts to guests
     const timer = setInterval(() => {
       setGameState((prev) => {
         if (!prev || prev.status !== 'playing' || prev.turn.status !== 'active') return prev;
@@ -508,7 +729,7 @@ export default function App() {
             isSystem: true,
           };
 
-          return {
+          const next: GameState = {
             ...prev,
             turn: {
               ...prev.turn,
@@ -517,6 +738,8 @@ export default function App() {
             },
             messages: [...prev.messages, roundEndMsg],
           };
+          roomSync.broadcastState(next);
+          return next;
         }
 
         if (prev.turn.timeRemaining <= 6) {
@@ -550,7 +773,7 @@ export default function App() {
         p.id === userProfile.id ? { ...p, points: (p.points || 0) + earned } : p
       );
 
-      return {
+      const next: GameState = {
         ...prev,
         players: updatedPlayers,
         scores: {
@@ -579,6 +802,8 @@ export default function App() {
             ]
           : prev.messages,
       };
+      roomSync.broadcastState(next);
+      return next;
     });
   };
 
@@ -590,7 +815,7 @@ export default function App() {
       if (!prev) return null;
       const card = prev.turn.cardsInTurn[prev.turn.currentCardIndex];
 
-      return {
+      const next: GameState = {
         ...prev,
         turn: {
           ...prev.turn,
@@ -599,6 +824,8 @@ export default function App() {
           skippedWords: card ? [...prev.turn.skippedWords, card.word] : prev.turn.skippedWords,
         },
       };
+      roomSync.broadcastState(next);
+      return next;
     });
   };
 
@@ -606,44 +833,23 @@ export default function App() {
     if (!gameState || gameState.turn.status !== 'active') return;
     sounds.playBuzz();
 
-    setGameState((prev) => {
-      if (!prev) return null;
-      const card = prev.turn.cardsInTurn[prev.turn.currentCardIndex];
-      const team = prev.turn.currentTeam;
-      const currentExplainer = prev.players.find((p) => p.id === prev.turn.explainerId);
-      const explainerName = currentExplainer?.name || 'explainer';
-
-      const buzzNotification = tabooWord
-        ? `${displayName} buzzed "${explainerName}" - taboo: "${tabooWord}" (-1 pt)`
-        : `${displayName} buzzed "${explainerName}" (-1 pt)`;
-
-      return {
-        ...prev,
-        scores: {
-          ...prev.scores,
-          [team]: Math.max(0, prev.scores[team] - 1),
-        },
-        turn: {
-          ...prev.turn,
-          currentCardIndex: (prev.turn.currentCardIndex + 1) % prev.turn.cardsInTurn.length,
-          pointsThisTurn: prev.turn.pointsThisTurn - 1,
-          buzzedWords: card ? [...prev.turn.buzzedWords, card.word] : prev.turn.buzzedWords,
-        },
-        messages: [
-          ...prev.messages,
-          {
-            id: `msg-${Date.now()}`,
-            playerId: userProfile.id,
-            playerName: displayName,
-            avatar: '🚨',
-            team: 'spectator',
-            text: buzzNotification,
-            timestamp: Date.now(),
-            isBuzzed: true,
-          },
-        ],
-      };
-    });
+    const isHost = gameState.players.find((p) => p.id === userProfile.id)?.isHost;
+    if (isHost) {
+      setGameState((prev) => {
+        if (!prev) return null;
+        const next = applyBuzzAction(prev, tabooWord || '', displayName);
+        roomSync.broadcastState(next);
+        return next;
+      });
+    } else {
+      setGameState((prev) => (prev ? applyBuzzAction(prev, tabooWord || '', displayName) : null));
+      roomSync.sendToHost({
+        type: 'PLAYER_ACTION',
+        action: 'BUZZ',
+        payload: { tabooWord },
+        senderId: userProfile.id,
+      });
+    }
   };
 
   const handleNextTurn = () => {
@@ -658,13 +864,18 @@ export default function App() {
     const nextRound = isLastTurnOfRound ? gameState.currentRound + 1 : gameState.currentRound;
 
     if (nextRound > gameState.totalRounds) {
-      setGameState((prev) => (prev ? { ...prev, status: 'gameOver' } : null));
+      setGameState((prev) => {
+        if (!prev) return null;
+        const next: GameState = { ...prev, status: 'gameOver' };
+        roomSync.broadcastState(next);
+        return next;
+      });
       return;
     }
 
     setGameState((prev) => {
       if (!prev) return null;
-      return {
+      const next: GameState = {
         ...prev,
         currentRound: nextRound,
         turn: {
@@ -681,31 +892,53 @@ export default function App() {
           buzzedWords: [],
         },
       };
+      roomSync.broadcastState(next);
+      return next;
     });
   };
 
   const handleSkipExplainerTurn = () => {
     if (!gameState) return;
     sounds.playClick();
-    setGameState((prev) => (prev ? skipExplainerTurn(prev, true, displayName) : null));
+    setGameState((prev) => {
+      if (!prev) return null;
+      const next = skipExplainerTurn(prev, true, displayName);
+      roomSync.broadcastState(next);
+      return next;
+    });
   };
 
   const handleTransferHost = (targetPlayerId: string) => {
     if (!gameState) return;
     sounds.playClick();
-    setGameState((prev) => (prev ? transferHostRole(prev, targetPlayerId) : null));
+    setGameState((prev) => {
+      if (!prev) return null;
+      const next = transferHostRole(prev, targetPlayerId);
+      roomSync.broadcastState(next);
+      return next;
+    });
   };
 
   const handleKickPlayer = (targetPlayerId: string) => {
     if (!gameState) return;
     sounds.playClick();
-    setGameState((prev) => (prev ? kickPlayerFromGame(prev, targetPlayerId, displayName) : null));
+    setGameState((prev) => {
+      if (!prev) return null;
+      const next = kickPlayerFromGame(prev, targetPlayerId, displayName);
+      roomSync.broadcastState(next);
+      return next;
+    });
   };
 
   const handleEndGameEarly = () => {
     if (!gameState) return;
     sounds.playVictory();
-    setGameState((prev) => (prev ? { ...prev, status: 'gameOver' } : null));
+    setGameState((prev) => {
+      if (!prev) return null;
+      const next: GameState = { ...prev, status: 'gameOver' };
+      roomSync.broadcastState(next);
+      return next;
+    });
   };
 
   const handlePlayAgain = () => {
@@ -713,91 +946,51 @@ export default function App() {
     sounds.playClick();
     setGameState((prev) => {
       if (!prev) return null;
-      return {
+      const next: GameState = {
         ...prev,
         status: 'lobby',
         currentRound: 1,
         scores: { red: 0, blue: 0 },
         messages: [],
       };
+      roomSync.broadcastState(next);
+      return next;
     });
   };
 
   const handleSendMessage = (text: string) => {
     if (!gameState) return;
     const player = gameState.players.find((p) => p.id === userProfile.id);
-    const card = gameState.turn.cardsInTurn[gameState.turn.currentCardIndex];
-    const isGuesser =
-      gameState.turn.status === 'active' &&
-      player?.team === gameState.turn.currentTeam &&
-      gameState.turn.explainerId !== userProfile.id;
+    const sender = player || {
+      id: userProfile.id,
+      name: displayName,
+      avatar: userProfile.avatar,
+      team: 'spectator' as TeamId,
+    };
 
-    // Check fuzzy match for active guessers (accepts 1-2 letter typos)
-    if (isGuesser && card) {
-      const matchResult = checkGuessMatch(text, card.word, card.points || 4);
-      if (matchResult.isMatch) {
-        sounds.playCorrect();
-        const earned = matchResult.points;
-        const currentTeam = gameState.turn.currentTeam;
+    const isHost = gameState.players.find((p) => p.id === userProfile.id)?.isHost;
 
-        setGameState((prev) => {
-          if (!prev) return null;
-          const updatedPlayers = prev.players.map((p) =>
-            p.id === userProfile.id ? { ...p, points: (p.points || 0) + earned } : p
-          );
-          const nextCardIdx = (prev.turn.currentCardIndex + 1) % prev.turn.cardsInTurn.length;
+    if (isHost) {
+      setGameState((prev) => {
+        if (!prev) return null;
+        const result = applyChatMessage(prev, text, sender);
+        if (result.isCorrect) sounds.playCorrect();
+        roomSync.broadcastState(result.updatedState);
+        return result.updatedState;
+      });
+    } else {
+      // Guest optimistically updates chat and sends to host
+      const result = applyChatMessage(gameState, text, sender);
+      if (result.isCorrect) sounds.playCorrect();
+      setGameState(result.updatedState);
 
-          return {
-            ...prev,
-            players: updatedPlayers,
-            scores: {
-              ...prev.scores,
-              [currentTeam]: prev.scores[currentTeam] + earned,
-            },
-            turn: {
-              ...prev.turn,
-              currentCardIndex: nextCardIdx,
-              pointsThisTurn: prev.turn.pointsThisTurn + earned,
-              correctWords: [...prev.turn.correctWords, card.word],
-            },
-            messages: [
-              ...prev.messages,
-              {
-                id: `msg-${Date.now()}`,
-                playerId: userProfile.id,
-                playerName: displayName,
-                avatar: player?.avatar || '🎉',
-                team: currentTeam,
-                text: `${displayName}: ${text} (correct word: "${card.word}") (+${earned}) ✓`,
-                timestamp: Date.now(),
-                isCorrectGuess: true,
-              },
-            ],
-          };
-        });
-        return;
-      }
+      roomSync.sendToHost({
+        type: 'PLAYER_ACTION',
+        action: 'SEND_MESSAGE',
+        payload: { text, senderName: displayName },
+        senderId: userProfile.id,
+      });
     }
-
-    // Standard chat message
-    setGameState((prev) => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        messages: [
-          ...prev.messages,
-          {
-            id: `msg-${Date.now()}`,
-            playerId: userProfile.id,
-            playerName: displayName,
-            avatar: player?.avatar || '👱',
-            team: player?.team || 'spectator',
-            text,
-            timestamp: Date.now(),
-          },
-        ],
-      };
-    });
   };
 
   return (
@@ -933,6 +1126,12 @@ export default function App() {
         isOpen={isGoogleSignInOpen}
         onClose={() => setIsGoogleSignInOpen(false)}
         onSuccess={handleGoogleSignInSuccess}
+        onContinueAsGuest={() => {
+          setIsGoogleSignInOpen(false);
+          if (googleSignInIntent === 'createRoom') {
+            setCurrentView('create');
+          }
+        }}
         title={
           googleSignInIntent === 'createRoom'
             ? 'Sign in to Create a Room'
@@ -940,7 +1139,7 @@ export default function App() {
         }
         subtitle={
           googleSignInIntent === 'createRoom'
-            ? 'Room creation is available for Google accounts. Guests can join and play any match without signing in.'
+            ? 'Connect your Google account to get verified host status and use your profile photo, or continue directly as guest.'
             : 'Sign in with Google to create rooms, use your Google profile photo, and host matches.'
         }
       />

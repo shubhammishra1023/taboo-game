@@ -1,5 +1,6 @@
 import { ChatMessage, GameMode, GameSettings, GameState, Player, TabooCard, TeamId, WordPack } from '../types';
 import { getCardsForGame, WORD_PACKS } from '../data/words';
+export { getCardsForGame };
 import { sounds } from './audio';
 import { AvatarConfig } from '../components/AvatarRenderer';
 
@@ -58,6 +59,7 @@ export function createNewGame(
 
   return {
     roomCode,
+    hostId: host.id,
     status: 'lobby',
     currentRound: 1,
     totalRounds: settings.rounds,
@@ -93,6 +95,148 @@ export function createNewGame(
       },
     ],
     roundHistory: [],
+  };
+}
+
+// Helper to create a guest game state for a player joining via link while syncing
+export function createGuestGame(
+  roomCode: string,
+  guest: UserProfile,
+  asSpectator: boolean = false,
+  avatarConfig?: AvatarConfig
+): GameState {
+  const hostPlaceholder: Player = {
+    id: `host-placeholder-${roomCode}`,
+    name: 'Room Host',
+    avatar: '👑',
+    team: 'red',
+    isHost: true,
+    points: 0,
+    turnsPlayed: 0,
+  };
+
+  const guestPlayer: Player = {
+    id: guest.id,
+    name: guest.name,
+    avatar: guest.avatar,
+    avatarUrl: guest.useGooglePhoto !== false ? guest.avatarUrl : undefined,
+    team: asSpectator ? 'spectator' : 'blue',
+    isHost: false, // Never host!
+    points: 0,
+    turnsPlayed: 0,
+    avatarConfig,
+  };
+
+  const initialCards = getCardsForGame(DEFAULT_SETTINGS.selectedPackIds, 50, WORD_PACKS);
+
+  return {
+    roomCode,
+    status: 'lobby',
+    currentRound: 1,
+    totalRounds: DEFAULT_SETTINGS.rounds,
+    scores: { red: 0, blue: 0 },
+    players: [hostPlaceholder, guestPlayer],
+    settings: DEFAULT_SETTINGS,
+    turn: {
+      currentTeam: 'red',
+      explainerId: hostPlaceholder.id,
+      status: 'waiting',
+      timeRemaining: DEFAULT_SETTINGS.turnTime,
+      currentCardIndex: 0,
+      cardsInTurn: initialCards,
+      correctWords: [],
+      skippedWords: [],
+      buzzedWords: [],
+      pointsThisTurn: 0,
+      skipsUsed: 0,
+    },
+    messages: [
+      {
+        id: `sys-${Date.now()}`,
+        playerId: 'system',
+        playerName: 'System',
+        avatar: '⚡',
+        team: 'spectator',
+        text: `Connecting to room ${roomCode}...`,
+        timestamp: Date.now(),
+        isSystem: true,
+      },
+    ],
+    roundHistory: [],
+  };
+}
+
+// Add a player to an existing game state with team balancing and isHost=false
+export function addPlayerToGame(
+  gameState: GameState,
+  playerProfile: {
+    id: string;
+    name: string;
+    avatar: string;
+    avatarUrl?: string;
+    avatarConfig?: AvatarConfig;
+  },
+  asSpectator: boolean = false
+): GameState {
+  // If player already exists, update their profile details
+  const existingIndex = gameState.players.findIndex((p) => p.id === playerProfile.id);
+  if (existingIndex >= 0) {
+    const updatedPlayers = gameState.players.map((p) =>
+      p.id === playerProfile.id
+        ? {
+            ...p,
+            name: playerProfile.name,
+            avatar: playerProfile.avatar,
+            avatarUrl: playerProfile.avatarUrl,
+            avatarConfig: playerProfile.avatarConfig || p.avatarConfig,
+          }
+        : p
+    );
+    return { ...gameState, players: updatedPlayers };
+  }
+
+  // Remove any temporary placeholder host if a real host exists
+  let currentPlayers = gameState.players;
+  if (currentPlayers.some((p) => p.isHost && p.id.startsWith('host-placeholder-')) && currentPlayers.length > 1) {
+    currentPlayers = currentPlayers.filter((p) => !p.id.startsWith('host-placeholder-'));
+  }
+
+  // Balance teams
+  const redCount = currentPlayers.filter((p) => p.team === 'red').length;
+  const blueCount = currentPlayers.filter((p) => p.team === 'blue').length;
+  const targetTeam: TeamId = asSpectator
+    ? 'spectator'
+    : redCount > blueCount
+    ? 'blue'
+    : 'red';
+
+  const newPlayer: Player = {
+    id: playerProfile.id,
+    name: playerProfile.name,
+    avatar: playerProfile.avatar,
+    avatarUrl: playerProfile.avatarUrl,
+    avatarConfig: playerProfile.avatarConfig,
+    team: targetTeam,
+    isHost: false, // Guest is never host!
+    points: 0,
+    turnsPlayed: 0,
+  };
+
+  const joinMessage: ChatMessage = {
+    id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    playerId: 'system',
+    playerName: 'System',
+    avatar: '👋',
+    team: targetTeam,
+    text: `${playerProfile.name} joined the room!`,
+    timestamp: Date.now(),
+    isSystem: true,
+  };
+
+  return {
+    ...gameState,
+    players: [...currentPlayers, newPlayer],
+    messages: [...gameState.messages, joinMessage],
   };
 }
 
@@ -423,5 +567,127 @@ export function kickPlayerFromGame(
     messages: [...gameState.messages, msg],
   };
 }
+
+// Unified chat and guess evaluation
+export function applyChatMessage(
+  gameState: GameState,
+  text: string,
+  sender: { id: string; name: string; avatar: string; team: TeamId }
+): { updatedState: GameState; isCorrect: boolean } {
+  const clean = text.trim();
+  if (!clean) return { updatedState: gameState, isCorrect: false };
+
+  // Check if guessing during active turn
+  if (gameState.status === 'playing' && gameState.turn.status === 'active') {
+    const card = gameState.turn.cardsInTurn[gameState.turn.currentCardIndex];
+    if (card) {
+      const matchResult = checkGuessMatch(clean, card.word, card.points || 4);
+      if (matchResult.isMatch) {
+        const earned = matchResult.points;
+        const currentTeam = gameState.turn.currentTeam;
+        const nextCardIdx = (gameState.turn.currentCardIndex + 1) % gameState.turn.cardsInTurn.length;
+
+        const updatedPlayers = gameState.players.map((p) =>
+          p.id === sender.id ? { ...p, points: (p.points || 0) + earned } : p
+        );
+
+        const correctMsg: ChatMessage = {
+          id: `msg-${Date.now()}`,
+          playerId: sender.id,
+          playerName: sender.name,
+          avatar: sender.avatar,
+          team: currentTeam,
+          text: `${sender.name}: ${clean} (correct word: "${card.word}") (+${earned}) ✓`,
+          timestamp: Date.now(),
+          isCorrectGuess: true,
+        };
+
+        return {
+          isCorrect: true,
+          updatedState: {
+            ...gameState,
+            players: updatedPlayers,
+            scores: {
+              ...gameState.scores,
+              [currentTeam]: gameState.scores[currentTeam] + earned,
+            },
+            turn: {
+              ...gameState.turn,
+              currentCardIndex: nextCardIdx,
+              pointsThisTurn: gameState.turn.pointsThisTurn + earned,
+              correctWords: [...gameState.turn.correctWords, card.word],
+            },
+            messages: [...gameState.messages, correctMsg],
+          },
+        };
+      }
+    }
+  }
+
+  // Standard chat message
+  const chatMsg: ChatMessage = {
+    id: `msg-${Date.now()}`,
+    playerId: sender.id,
+    playerName: sender.name,
+    avatar: sender.avatar,
+    team: sender.team,
+    text: clean,
+    timestamp: Date.now(),
+  };
+
+  return {
+    isCorrect: false,
+    updatedState: {
+      ...gameState,
+      messages: [...gameState.messages, chatMsg],
+    },
+  };
+}
+
+// Unified buzz action
+export function applyBuzzAction(
+  gameState: GameState,
+  tabooWord: string,
+  buzzerName?: string
+): GameState {
+  if (gameState.status !== 'playing' || gameState.turn.status !== 'active') return gameState;
+  const currentCard = gameState.turn.cardsInTurn[gameState.turn.currentCardIndex];
+  if (!currentCard) return gameState;
+
+  const currentTeam = gameState.turn.currentTeam;
+  const nextCardIdx = (gameState.turn.currentCardIndex + 1) % gameState.turn.cardsInTurn.length;
+
+  const buzzMessage: ChatMessage = {
+    id: `msg-${Date.now()}-buzz`,
+    playerId: 'system',
+    playerName: 'System',
+    avatar: '🚨',
+    team: currentTeam,
+    text: buzzerName
+      ? `🚨 ${buzzerName} BUZZED! Taboo word "${tabooWord}" was triggered!`
+      : `🚨 BUZZED! Taboo word "${tabooWord}" was triggered!`,
+    timestamp: Date.now(),
+    isBuzzed: true,
+  };
+
+  return {
+    ...gameState,
+    scores: {
+      ...gameState.scores,
+      [currentTeam]: Math.max(0, gameState.scores[currentTeam] - 1),
+    },
+    turn: {
+      ...gameState.turn,
+      currentCardIndex: nextCardIdx,
+      pointsThisTurn: Math.max(0, gameState.turn.pointsThisTurn - 1),
+      buzzedWords: [
+        ...gameState.turn.buzzedWords,
+        { word: currentCard.word, tabooTriggered: tabooWord },
+      ],
+    },
+    messages: [...gameState.messages, buzzMessage],
+  };
+}
+
 
 

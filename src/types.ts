@@ -80,6 +80,7 @@ export interface ChatMessage {
 
 export interface GameState {
   roomCode: string;
+  hostId?: string;
   status: 'lobby' | 'playing' | 'gameOver';
   currentRound: number;
   totalRounds: number;

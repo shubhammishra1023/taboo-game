@@ -58,7 +58,9 @@ export const RoomLobby: React.FC<RoomLobbyProps> = ({
   const [activeMenuPlayerId, setActiveMenuPlayerId] = useState<string | null>(null);
 
   const currentPlayer = gameState.players.find((p) => p.id === currentPlayerId);
-  const isHost = currentPlayer?.isHost || false;
+  const isHost = Boolean(
+    gameState.hostId ? gameState.hostId === currentPlayerId : currentPlayer?.isHost
+  );
 
   const redPlayers = gameState.players.filter((p) => p.team === 'red');
   const bluePlayers = gameState.players.filter((p) => p.team === 'blue');

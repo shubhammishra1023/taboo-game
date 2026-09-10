@@ -62,7 +62,9 @@ export const ActiveGameView: React.FC<ActiveGameViewProps> = ({
   const { turn, scores, currentRound, totalRounds, settings } = gameState;
   const explainer = gameState.players.find((p) => p.id === turn.explainerId);
   const currentPlayer = gameState.players.find((p) => p.id === currentPlayerId);
-  const isHost = Boolean(currentPlayer?.isHost);
+  const isHost = Boolean(
+    gameState.hostId ? gameState.hostId === currentPlayerId : currentPlayer?.isHost
+  );
 
   const isExplainer = currentPlayerId === turn.explainerId;
   const isTeammate = currentPlayer?.team === turn.currentTeam && !isExplainer;

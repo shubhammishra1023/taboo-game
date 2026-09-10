@@ -95,6 +95,14 @@ export const CreateGameScreen: React.FC<CreateGameScreenProps> = ({
             >
               {displayName || 'Player'}
             </h2>
+            {isGoogleUser && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-bold border border-blue-500/30">
+                <svg className="size-2.5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                </svg>
+                <span>Google Host</span>
+              </span>
+            )}
           </div>
 
           <button
