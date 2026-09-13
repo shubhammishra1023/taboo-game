@@ -57,9 +57,13 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
         return;
       }
       if (res.error) {
-        // If popup was closed by user or cancelled, show friendly message without breaking
-        if (res.error.includes('popup-closed-by-user')) {
-          setErrorMessage('Sign-in window closed. You can try again or use the one-click profile below.');
+        // If domain is not authorized in Firebase Console
+        if (res.code === 'auth/unauthorized-domain' || res.error.includes('unauthorized-domain') || res.error.includes('not authorized for OAuth operations')) {
+          setErrorMessage(
+            'Domain not authorized: Add "taboo-game-khaki.vercel.app" in Firebase Console -> Authentication -> Settings -> Authorized domains. You can also use the Quick Sign-In below in the meantime!'
+          );
+        } else if (res.error.includes('popup-closed-by-user')) {
+          setErrorMessage('Sign-in window closed. You can try again or use the quick sign-in below.');
         } else {
           setErrorMessage(res.error);
         }

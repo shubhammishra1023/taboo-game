@@ -10,8 +10,19 @@ import {
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
+// Allow overriding via environment variables (e.g. on Vercel deployment) or fallback to json config
+const activeFirebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfig.appId,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || firebaseConfig.measurementId,
+};
+
 // Initialize Firebase App instance safely
-export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+export const app = getApps().length === 0 ? initializeApp(activeFirebaseConfig) : getApp();
 
 // Firebase Auth & Firestore services
 export const auth = getAuth(app);
@@ -30,7 +41,12 @@ export async function signInWithGoogle() {
     return { success: true, user: result.user, error: null };
   } catch (error: any) {
     console.error('Google Sign-In Error:', error);
-    return { success: false, user: null, error: error.message || 'Failed to sign in with Google' };
+    return {
+      success: false,
+      user: null,
+      error: error.message || 'Failed to sign in with Google',
+      code: error.code || '',
+    };
   }
 }
 
